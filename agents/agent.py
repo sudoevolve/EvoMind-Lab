@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 import math
+import os
 from dataclasses import dataclass, field
 from typing import Any
+from urllib import request
 
 from .genome import Genome
 from .memory import Memory
@@ -40,7 +43,10 @@ class Agent:
         if not action_space:
             return ""
 
-        strategy = self.genome.decision_strategy
+        strategy = os.getenv("EVOMIND_FORCE_STRATEGY") or self.genome.decision_strategy
+        if strategy == "ollama":
+            return self._act_ollama(observation=observation, action_space=action_space)
+
         if strategy == "random":
             return self.rng.choice(action_space)
 
@@ -123,3 +129,77 @@ class Agent:
                 best_score = score
                 best_action = a
         return best_action
+
+    def _act_ollama(self, observation: dict[str, Any], action_space: list[str]) -> str:
+        model = os.getenv("EVOMIND_OLLAMA_MODEL") or "qwen3:8b"
+        base_url = os.getenv("EVOMIND_OLLAMA_URL") or "http://localhost:11434"
+        timeout_s = float(os.getenv("EVOMIND_OLLAMA_TIMEOUT") or "10")
+
+        exploration = float(self.genome.biases.get("exploration", 0.2))
+        temperature = float(min(1.2, max(0.0, 0.2 + 0.8 * exploration)))
+
+        t = observation.get("t", len(self.behavior_history))
+        stats_lines: list[str] = []
+        for a in action_space:
+            v = float(self.action_value.get(a, 0.0))
+            n = int(self.action_count.get(a, 0))
+            stats_lines.append(f"{a}\tvalue={v:.4f}\tcount={n}")
+        recent = self.memory.short_term[-6:]
+        long_term = self.memory.long_term[-6:]
+
+        user = "\n".join(
+            [
+                f"t={t}",
+                f"Allowed actions: {', '.join(action_space)}",
+                "Return exactly one allowed action. No explanation.",
+                "Estimates:",
+                *stats_lines,
+                "Recent memory:",
+                *([*recent] if recent else ["(none)"]),
+                "Long-term memory:",
+                *([*long_term] if long_term else ["(none)"]),
+            ]
+        )
+
+        payload = {
+            "model": model,
+            "stream": False,
+            "messages": [
+                {"role": "system", "content": self.genome.prompt_template},
+                {"role": "user", "content": user},
+            ],
+            "options": {"temperature": temperature, "num_predict": 32},
+        }
+
+        try:
+            req = request.Request(
+                url=f"{base_url.rstrip('/')}/api/chat",
+                data=json.dumps(payload).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with request.urlopen(req, timeout=timeout_s) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        except Exception:
+            return self.rng.choice(action_space)
+
+        content = ""
+        if isinstance(data, dict):
+            msg = data.get("message")
+            if isinstance(msg, dict):
+                content = str(msg.get("content", ""))
+            else:
+                content = str(data.get("response", ""))
+
+        text = content.strip().splitlines()[0].strip().strip("\"'`")
+        if text in action_space:
+            return text
+
+        for a in action_space:
+            if a == text:
+                return a
+        for a in action_space:
+            if a in text:
+                return a
+
+        return self.rng.choice(action_space)
