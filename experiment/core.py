@@ -9,6 +9,7 @@ from pathlib import Path
 from agents.agent import Agent
 from agents.genome import Genome
 from environment.bandit import BanditEnv
+from environment.csv_market import CsvMarketEnv
 from environment.market import MarketEnv
 from evaluation.metrics import evaluate_population
 from evolution.reproduction import make_next_generation
@@ -24,7 +25,7 @@ def run(cfg: ExperimentConfig) -> Path:
     ensure_dir(run_dir)
     write_json(run_dir / "config.json", asdict(cfg))
 
-    population = _init_population(cfg.population_size, rng)
+    population = _init_population(cfg, rng)
     history_mean_task: list[float] = []
     history_mean_novelty: list[float] = []
     if not population or cfg.generations <= 0:
@@ -34,7 +35,17 @@ def run(cfg: ExperimentConfig) -> Path:
         episode_summaries: list[dict] = []
         for agent in population:
             env_rng = random.Random(rng.getrandbits(64))
-            if cfg.env == "market":
+            if cfg.env == "csv_market":
+                env = CsvMarketEnv(
+                    rng=env_rng,
+                    data_path=cfg.data_path,
+                    horizon=cfg.horizon,
+                    initial_cash=cfg.initial_cash,
+                    fee_bps=cfg.fee_bps,
+                    slippage_bps=cfg.slippage_bps,
+                    allow_stop=cfg.allow_stop,
+                )
+            elif cfg.env == "market":
                 env = MarketEnv(
                     rng=env_rng,
                     horizon=cfg.horizon,
@@ -113,11 +124,17 @@ def run(cfg: ExperimentConfig) -> Path:
     return run_dir
 
 
-def _init_population(pop_size: int, rng: random.Random) -> list[Agent]:
+def _init_population(cfg: ExperimentConfig, rng: random.Random) -> list[Agent]:
     population: list[Agent] = []
-    for _ in range(pop_size):
+    base = Genome()
+    if cfg.genome_overrides:
+        base_data = base.to_dict()
+        base_data.update(dict(cfg.genome_overrides))
+        base = Genome.from_dict(base_data)
+
+    for _ in range(cfg.population_size):
         agent_id = f"a{rng.getrandbits(48):012x}"
-        genome = Genome().mutate(rng, mutation_rate=1.0)
+        genome = base.mutate(rng, mutation_rate=1.0)
         population.append(
             Agent.create(
                 agent_id=agent_id,

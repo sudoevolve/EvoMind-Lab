@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass(frozen=True)
@@ -23,5 +24,8 @@ class ExperimentConfig:
     mu: float = 0.0
     sigma: float = 0.02
     fee_bps: float = 2.0
+    slippage_bps: float = 0.0
+    data_path: str = ""
+    genome_overrides: dict[str, Any] = field(default_factory=dict)
 
     output_dir: str = "logs/run"

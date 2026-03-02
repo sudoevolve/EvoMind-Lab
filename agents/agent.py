@@ -47,6 +47,9 @@ class Agent:
         if strategy == "ollama":
             return self._act_ollama(observation=observation, action_space=action_space)
 
+        if strategy == "rule":
+            return self._act_rule(observation=observation, action_space=action_space)
+
         if strategy == "random":
             return self.rng.choice(action_space)
 
@@ -191,7 +194,10 @@ class Agent:
             else:
                 content = str(data.get("response", ""))
 
-        text = content.strip().splitlines()[0].strip().strip("\"'`")
+        stripped = content.strip()
+        if not stripped:
+            return self.rng.choice(action_space)
+        text = stripped.splitlines()[0].strip().strip("\"'`")
         if text in action_space:
             return text
 
@@ -202,4 +208,76 @@ class Agent:
             if a in text:
                 return a
 
+        return self.rng.choice(action_space)
+
+    def _act_rule(self, observation: dict[str, Any], action_space: list[str]) -> str:
+        closes = observation.get("close_history", [])
+        if not isinstance(closes, list) or len(closes) < 4:
+            return self.rng.choice(action_space)
+
+        template = str(getattr(self.genome, "trading_template", "ma_cross"))
+        params = getattr(self.genome, "trading_params", {})
+        if not isinstance(params, dict):
+            params = {}
+
+        desired = "target_0"
+        if template == "breakout":
+            lookback = int(float(params.get("lookback", 48)))
+            threshold = float(params.get("threshold", 0.002))
+            if len(closes) >= lookback + 2:
+                prev = closes[-lookback - 1 : -1]
+                prev_max = max(prev) if prev else closes[-2]
+                if float(closes[-1]) > float(prev_max) * (1.0 + threshold):
+                    desired = "target_100"
+        elif template == "mean_reversion":
+            z_window = int(float(params.get("z_window", 48)))
+            z_entry = float(params.get("z_entry", 1.0))
+            if len(closes) >= z_window:
+                window = [float(x) for x in closes[-z_window:]]
+                mu = sum(window) / max(1, len(window))
+                var = sum((x - mu) ** 2 for x in window) / max(1, len(window))
+                sd = var ** 0.5
+                z = 0.0 if sd <= 1e-12 else (float(closes[-1]) - mu) / sd
+                if z <= -z_entry:
+                    desired = "target_100"
+                elif z >= z_entry:
+                    desired = "target_0"
+                else:
+                    desired = "target_50"
+        else:
+            fast = int(float(params.get("fast", 12)))
+            slow = int(float(params.get("slow", 48)))
+            if slow <= fast:
+                slow = fast + 4
+            if len(closes) >= slow:
+                fast_ma = sum(float(x) for x in closes[-fast:]) / max(1, fast)
+                slow_ma = sum(float(x) for x in closes[-slow:]) / max(1, slow)
+                desired = "target_100" if fast_ma > slow_ma else "target_0"
+
+        risk = float(self.genome.biases.get("risk_aversion", 0.0))
+        risk = float(min(1.0, max(0.0, risk)))
+        max_frac = 1.0 - 0.75 * risk
+        desired_frac = 0.0
+        if desired.startswith("target_"):
+            try:
+                desired_frac = int(desired.split("_", 1)[1]) / 100.0
+            except Exception:
+                desired_frac = 0.0
+        clipped = min(desired_frac, max_frac)
+        if clipped <= 0.125:
+            desired = "target_0"
+        elif clipped <= 0.375:
+            desired = "target_25"
+        elif clipped <= 0.625:
+            desired = "target_50"
+        elif clipped <= 0.875:
+            desired = "target_75"
+        else:
+            desired = "target_100"
+
+        if desired in action_space:
+            return desired
+        for a in action_space:
+            if a.startswith("target_"):
+                return a
         return self.rng.choice(action_space)

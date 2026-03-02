@@ -1,0 +1,16 @@
+{
+  "name": "crypto_backtest",
+  "experiment": {
+    "env": "csv_market",
+    "horizon": 128,
+    "allow_stop": true,
+    "initial_cash": 10000.0,
+    "fee_bps": 2.0,
+    "slippage_bps": 2.0,
+    "data_path": "projects/crypto_backtest/data/BTCUSDT-1m-2026-02.csv",
+    "genome_overrides": {
+      "decision_strategy": "rule",
+      "trading_template": "ma_cross"
+    }
+  }
+}

@@ -1,0 +1,55 @@
+EvoMind-Lab 运行结果分析
+- 环境: csv_market
+- 代数: 5 (0..4)
+- 初始资金: 10000.00
+
+字段说明（你只需要记住：收益↑、回撤↓、费用↓、换手↓、稳定↑）
+- task: 主要目标。在币圈回测里=收益率（0.01≈+1%）。
+- novelty: 行为新颖度。越高=和别人动作序列差异越大。
+- stability: 回报波动的反向指标。越高=每步 reward 更平稳。
+- efficiency: 越高=越少步数/越少无谓动作（含早停影响）。
+- final_equity: 最终资金。盈亏=final_equity-初始资金。
+- total_fee: 本次回测支付的成本（手续费+滑点）。越小越好。
+- turnover: 换手（交易金额总和）。越大越容易过拟合、越吃成本。
+- max_drawdown: 最大回撤（0.1≈10%）。越小越好。
+
+本次最推荐（按综合评分，来自第 4 代）
+ - #1 ae166a8f614bd 评分=-0.0230 | task=0.0010 novelty=0.506 stability=0.999 efficiency=0.848 | 策略=random/breakout | 盈亏=+10.23 资金=10010.23 回撤=0.0001 费用=3.00 换手=0.75x
+   - 动作: target_25 target_75 stop
+   - 诊断: 结构正常
+ - #2 ab13d062d7f7a 评分=-0.0230 | task=0.0010 novelty=0.506 stability=0.999 efficiency=0.848 | 策略=random/breakout | 盈亏=+10.23 资金=10010.23 回撤=0.0001 费用=3.00 换手=0.75x
+   - 动作: target_25 target_75 stop
+   - 诊断: 结构正常
+ - #3 ae583852d2ee5 评分=-0.0304 | task=0.0065 novelty=0.644 stability=0.999 efficiency=0.798 | 策略=epsilon_greedy/ma_cross | 盈亏=+65.20 资金=10065.20 回撤=0.0001 费用=4.00 换手=1.00x
+   - 动作: target_0 target_100 target_100 target_100 target_100 target_100 target_100 target_100 target_100 target_100 ...
+   - 诊断: 结构正常
+ - #4 a9b6e6f2af3b2 评分=-0.0359 | task=0.0009 novelty=0.550 stability=0.999 efficiency=0.798 | 策略=epsilon_greedy/ma_cross | 盈亏=+9.18 资金=10009.18 回撤=0.0000 费用=4.00 换手=1.00x
+   - 动作: target_0 target_0 target_100 target_100 stop
+   - 诊断: 结构正常
+ - #5 a59de3f9bbcfc 评分=-0.0506 | task=-0.0004 novelty=0.582 stability=1.000 efficiency=0.747 | 策略=epsilon_greedy/breakout | 盈亏=-4.25 资金=9995.75 回撤=0.0005 费用=5.00 换手=1.25x
+   - 动作: target_0 target_0 target_0 target_0 target_50 target_0 target_25 stop
+   - 诊断: 亏损
+
+第 4 代概览（全体）
+- task: 均值 0.0003 | 最好 0.0065 | 最差 -0.0028
+- novelty: 均值 0.628
+- stability: 均值 0.999
+- efficiency: 均值 0.580
+- 综合评分: 均值 -0.1214 | 最好 -0.0230
+- 盈亏: 均值 +2.60 | 最好 +65.20 | 最差 -27.98
+- 回撤: 均值 0.0010 | 最差 0.0049
+- 费用: 均值 8.56 | 最差 24.00
+- 换手: 均值 2.14x | 最差 6.00x
+
+每代趋势（均值）
+- 第 0 代: mean_task=-0.0001 best_task=0.0013 best=a4fe353710f57 best_score=-0.0099
+- 第 1 代: mean_task=-0.0005 best_task=0.0014 best=a6ac1afb918c8 best_score=-0.0114
+- 第 2 代: mean_task=-0.0000 best_task=0.0043 best=ad26e53ff6644 best_score=-0.0106
+- 第 3 代: mean_task=0.0006 best_task=0.0037 best=a9c680a515e87 best_score=0.0023
+- 第 4 代: mean_task=0.0003 best_task=0.0065 best=ae166a8f614bd best_score=-0.0230
+
+改进建议（针对当前任务：币圈回测筛选）
+- 平均收益率约 0.03%（注意：样本很短时不稳定）。
+- 进化还太短：建议 generations≥50，且用更长 CSV（至少几千根K线）再看趋势。
+- 目前 novelty 只是“动作序列差异”：后续可换成“收益曲线形状差异 + 行为差异”结合。
+- 想更像真实：加入多段 walk-forward（训练段选，测试段验），把测试段得分作为 task。

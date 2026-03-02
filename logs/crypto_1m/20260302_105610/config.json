@@ -1,0 +1,24 @@
+{
+  "seed": 0,
+  "generations": 80,
+  "population_size": 64,
+  "survivors": 16,
+  "elite_count": 4,
+  "mutation_rate": 0.2,
+  "env": "csv_market",
+  "arms": 8,
+  "horizon": 8192,
+  "allow_stop": false,
+  "initial_cash": 10000.0,
+  "start_price": 100.0,
+  "mu": 0.0,
+  "sigma": 0.02,
+  "fee_bps": 2.0,
+  "slippage_bps": 2.0,
+  "data_path": "projects/crypto_backtest/data/BTCUSDT-1m-2026-02.csv",
+  "genome_overrides": {
+    "decision_strategy": "rule",
+    "trading_template": "ma_cross"
+  },
+  "output_dir": "logs/crypto_1m"
+}

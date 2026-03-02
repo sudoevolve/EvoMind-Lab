@@ -15,7 +15,7 @@
 
 你现在还没有的（需要后续做）：
 
-- 真实大模型接入（目前 Agent.act 还是规则/统计策略，不会调用 LLM）
+- 云端商用模型接入与统一抽象（当前主要支持本地 Ollama；也保留规则/统计策略）
 - 并行、多环境任务集、长期无人值守的鲁棒运行（目前是单进程串行基线）
 - 更丰富可视化（目前只有日志与 ASCII sparkline）
 
@@ -82,6 +82,19 @@ py -m run --generations 30 --population 24 --survivors 12 --elite 3 --mutation 0
 
 > 说明：从子目录运行时，`py -m experiment.run` 会因为模块搜索路径问题找不到 `experiment` 包；因此提供了 `py -m run` 的方式。
 
+### 2.3 用 projects 配置跑（推荐）
+
+用 `--project` 直接加载 `projects/<name>/project.json`：
+
+```bash
+py -m experiment.run --project crypto_backtest --generations 10 --population 24 --survivors 12 --elite 3 --mutation 0.25 --out logs/crypto_backtest
+```
+
+`csv_market` 的数据文件支持两种格式：
+
+- 带表头的 OHLCV（至少包含 `close` 列）
+- Binance Kline 导出（无表头，逗号分隔，第 5 列为 close）
+
 ---
 
 ## 3. 参数说明
@@ -147,6 +160,116 @@ py -c "import json; p=r'logs\\run_demo\\20260302_090929\\generations.jsonl'; \
     \n  g=json.loads(line); print(g['generation'], round(g['mean']['task'],4), g['spark']['task'])"
 ```
 
+### 4.2 一键生成“可读分析报告”
+
+把某次 run 目录（或 generations.jsonl 文件）丢给分析器：
+
+```bash
+py -m experiment.analyze --run logs\crypto_backtest\20260302_090929 --top 5 --per-gen
+```
+
+分析器会做两件事：
+
+- 把报告打印到终端
+- 同时把报告写入 run 目录的 `analysis.txt`（方便后续查看与分享）
+
+### 4.3 常见疑问（FAQ）
+
+#### Q1：终端一关分析结果就没了，怎么办？
+
+A：用分析器时会自动把报告写到 run 目录的 `analysis.txt`。例如：
+
+```bash
+py -m experiment.analyze --run logs\crypto_1m\20260302_105610 --top 5 --per-gen
+```
+
+运行后你会在该目录看到：
+
+- `analysis.txt`
+
+#### Q2：我改了 `logs/.../config.json`，为什么再次运行没生效？
+
+A：`logs/<run>/config.json` 是“那次运行的参数快照”，只用于留档，不会被 `experiment.run` 读取来重新跑。
+
+要让参数生效，你应该：
+
+- 用命令行参数运行（例如 `--generations/--population/--horizon/...`），或者
+- 修改 `projects/<name>/project.json` 里的 `experiment` 配置，再用 `--project <name>` 跑新的一次
+
+#### Q3：我保留的好个体在哪里？“精英保留”到底保留了什么？
+
+A：保留的是“Genome（基因）”，不是同一个 `agent_id`。
+
+- 每一代所有个体都在 `generations.jsonl` 的 `agents[]` 里（包含 `agent_id / genome / objectives / episode`）
+- 精英保留会把排名靠前的父代 genome 直接复制到下一代，但子代会分配新的 `agent_id`
+- 父子关系在每一代记录的 `lineage_next` 里：`下一代 child_id -> (父代 parent_id,)`
+
+实际操作上，拿“好个体”做复现/对比通常有两种方式：
+
+- 方式 1：看 `analysis.txt` 的 Top N，拿其中的 `agent_id` 去 `generations.jsonl` 里搜索，复制它的 `genome`
+- 方式 2：沿 `lineage_next` 追溯某个 `agent_id` 的祖先，观察哪些基因在多代里被保留下来
+
+#### Q4：我怎么找到“最全的 K 线数据”？
+
+A：做 1m 回测最常用、覆盖广且可复现的数据源是交易所官方历史数据。
+
+- Binance 官方历史数据（推荐）：data.binance.vision  
+  - 常见为按 `symbol / interval / year / month` 打包下载的 CSV/ZIP
+  - 本仓库的 `csv_market` 支持：带表头 close 或 Binance kline 无表头格式（第 5 列 close）
+
+更“全”的（tick/逐笔、多交易所）通常是付费数据；如果你只是做 1m 策略筛选，官方历史数据一般足够。
+
+#### Q5：为什么我没感受到“进化”？AI 会一次次变好吗？
+
+A：这里的“变好”来自进化算法（选择/繁殖/变异）在搜索 Genome 空间，而不是训练大模型权重。
+
+它通常呈现为：
+
+- “最好个体”更可能变好，但不保证每一代都更好（行情噪声 + 随机变异会让曲线抖动）
+- 多目标选择会保留“新颖/稳定/高效率”的个体，因此利润不一定单调上升
+
+如果你几乎看不到进化效果，最常见原因是“信号不够强/评估不够稳”：
+
+- horizon 太短（1m 数据用几十/几百步很容易全是噪声）
+- 种群/代数太小（搜索强度不够）
+- 评估只跑 CSV 开头一段（容易对开头行情过拟合，换区间就失效）
+
+经验上更容易看到趋势的做法：
+
+- 把 horizon 拉长到几千~上万步，并增加 generations/population
+- 用多段窗口/随机起点（或 walk-forward：训练段选、测试段验）来做更可信的筛选
+
+#### Q6：我想用大模型（Ollama），为什么 GPU 没动？怎么确认真的在走模型？
+
+A：GPU 没动通常只有两种原因：要么你没启动 Ollama 服务，要么本次运行没用 `ollama` 策略（还在用 `rule/ucb1/...` 这种 CPU 规则/统计策略）。
+
+1) 启动 Ollama 服务（Windows 常见路径）：
+
+```bash
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" serve
+```
+
+2) 确认服务与模型都可用：
+
+```bash
+& "$env:LOCALAPPDATA\Programs\Ollama\ollama.exe" list
+```
+
+3) 让本仓库强制使用 Ollama（推荐用环境变量，方便随时开关）：
+
+```bash
+$env:EVOMIND_FORCE_STRATEGY='ollama'
+$env:EVOMIND_OLLAMA_MODEL='qwen3:8b'
+$env:EVOMIND_OLLAMA_URL='http://127.0.0.1:11434'
+$env:EVOMIND_OLLAMA_TIMEOUT='60'
+py -m experiment.run --project crypto_backtest --generations 1 --population 2 --survivors 1 --elite 1 --horizon 16 --out logs/crypto_llm
+```
+
+4) 如何确认“真的走了模型”：
+
+- 观察 Ollama 控制台窗口会持续打印请求/加载信息
+- `analysis.txt`/`generations.jsonl` 里的“策略”字段显示的是 genome 的 `decision_strategy`，如果你用的是 `EVOMIND_FORCE_STRATEGY` 强制策略，字段可能仍显示为 `rule/ucb1/...`，但实际动作来源是 Ollama
+
 ---
 
 ## 5. 代码入口（你要改什么看这里）
@@ -185,23 +308,22 @@ py -c "import json; p=r'logs\\run_demo\\20260302_090929\\generations.jsonl'; \
 
 你需要做 3 件事：
 
-1) 选一个模型来源（OpenAI / Azure / 本地 Ollama / vLLM / llama.cpp 等）
-2) 写一个“模型调用 client”（把 prompt 发出去，拿回文本）
-3) 写一个“动作选择 policy”（把 observation + action_space 变成 prompt，调用 client，解析为合法动作）
-
-目前仓库里还没有这些文件，所以这一节给的是“可照着做的接入方式”，不是已经默认完成的功能。
+1) 选一个模型来源（本仓库当前支持本地 Ollama）
+2) 把模型输出约束到 action_space（只允许输出一个动作字符串）
+3) 对不合法输出做回退（随机合法动作）
 
 ### 6.1 推荐的最小接入方式：做一个 LLM 驱动的 ActionPolicy
 
-建议把“动作选择”从 `Agent` 中抽出来，做成可插拔策略层。例如：
+当前已经提供了最小的 Ollama 接入：把 `decision_strategy` 设为 `ollama`，即可通过 `http://localhost:11434` 走 `/api/chat` 选动作（只输出动作字符串）。
 
-1) 新增一个模块（示例命名）：
+常用环境变量：
 
-- `models/llm_client.py`：封装模型调用（OpenAI / Azure / 本地 vLLM / Ollama / llama.cpp 等）
-- `agents/policy.py`：定义一个 `Policy` 接口：`choose_action(observation, agent)->str`
-- `agents/policies/llm_policy.py`：实现用 LLM 产出动作
+- `EVOMIND_FORCE_STRATEGY=ollama`：强制所有 agent 使用 Ollama
+- `EVOMIND_OLLAMA_MODEL=qwen3:8b`：指定模型名
+- `EVOMIND_OLLAMA_URL=http://localhost:11434`：指定服务地址
+- `EVOMIND_OLLAMA_TIMEOUT=10`：请求超时秒数
 
-2) 在 `Agent.create()` 或 `Agent` 构造时注入 policy（或者在 `act()` 内根据 genome 决定用哪个 policy）。
+如果你不想用模型，也可以继续用 `rule / ucb1 / softmax / epsilon_greedy / random`。
 
 **动作空间约束非常关键**：环境会在 `observation["action_space"]` 给出允许动作列表，你需要让模型只输出其中之一。
 
